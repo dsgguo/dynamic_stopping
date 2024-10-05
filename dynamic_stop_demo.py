@@ -10,7 +10,7 @@ import numpy as np
 from scipy.signal import sosfiltfilt
 from sklearn.metrics import balanced_accuracy_score
 import sys
-sys.path.append("D:\Duan_code\MetaBCI\MetaBCI")
+sys.path.append(r"d:\User_code\dsg\duanshunguo\MetaBCI\MetaBCI-master")
 from metabci.brainda.datasets import Wang2016
 from metabci.brainda.paradigms import SSVEP
 from metabci.brainda.algorithms.utils.model_selection import (
@@ -25,7 +25,7 @@ from metabci.brainda.algorithms.utils.model_selection import (
 from scipy.stats import gaussian_kde
 import matplotlib.pyplot as plt
 from scipy.integrate import quad, trapz
-from Dynamic_stop import DynamicStop
+from DS.Dynamic_stop import DynamicStop
 dataset = Wang2016()
 delay = 0.14 # seconds
 channels = ['PZ', 'PO5', 'PO3', 'POZ', 'PO4', 'PO6', 'O1', 'OZ', 'O2']
@@ -84,46 +84,61 @@ X, y, meta = paradigm.get_data(
 
 loo_indices = generate_loo_indices(meta)
         
-
-duration = 0.4    
-        
-for model_name in models:
-    if model_name == 'fbtdca':
-        filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
-    else:
-        filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
-    
+Ds = DynamicStop(models['fbtrca'])
+for duration in [0.2,0.3]:
+    duration = duration 
+    filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
     filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
 
     n_loo = len(loo_indices[1][events[0]])#n_loo = 6
     loo_accs = []
-    for k in range(n_loo):
-        train_ind, validate_ind, test_ind = match_loo_indices(
-            k, meta, loo_indices)
-        train_ind = np.concatenate([train_ind, validate_ind])
+  
+    train_ind, validate_ind, test_ind = match_loo_indices(
+        2, meta, loo_indices)
+    train_ind = np.concatenate([train_ind, validate_ind])
 
-        trainX, trainY = filterX[train_ind], filterY[train_ind]
-        testX, testY = filterX[test_ind], filterY[test_ind]
+    trainX, trainY = filterX[train_ind], filterY[train_ind]
+    testX, testY = filterX[test_ind], filterY[test_ind]
+    Ds.train(trainX,trainY,duration)
         
-        Ds = DynamicStop(models[model_name],trainX,trainY)
-        Ds.train(duration)
-        bool = Ds.decide(testX[0:1,:,:],duration)
-        print(bool)
-        # rate = Ds.validate(testX,duration)
-        # print(rate)
-
-#     model = clone(models[model_name]).fit(
-#         trainX, trainY,
-#         Yf=Yf
-#     )
-        
-#     rhos = model.transform(testX)
+        # kde0,kde1,prob,dm0,dm1 = Ds.train(trainX,trainY,duration)
+        # p_H0_total,_ = quad(kde0,dm0[np.argmin(dm0)],dm0[np.argmax(dm0)])
+        # p_H1_total,_ = quad(kde1,dm1[np.argmin(dm1)],dm1[np.argmax(dm1)])
+a = 0.2
+duration_default = round(a,2)
+while duration_default < 1.0:
+    filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration_default))]), np.copy(y)
+    filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
     
-#     pred_labels = model.predict(testX)
+    _, _, test_ind = match_loo_indices(
+        2, meta, loo_indices)
+    testX, testY = filterX[test_ind], filterY[test_ind]
+    i = 0
+    bool = Ds.decide(testX[0:1,:,:],duration_default)
+    if bool:
+        i += 1
+        print(duration_default)
+        print("同意输出")
+    else:
+        a += 0.1
+        print("长度不足")
 
-#     loo_accs.append(
-#         balanced_accuracy_score(testY, pred_labels))
-# print("Model:{} LOO Acc:{:.2f}".format(model_name, np.mean(loo_accs)))
+
+
+        #     print(bool)
+        
+    #     model = clone(models[model_name]).fit(
+    #         trainX, trainY,
+    #         Yf=Yf
+    #     )
+        
+    #     rhos = model.transform(testX)
+
+    #     pred_labels = model.predict(testX)
+
+    #     loo_accs.append(
+    #         balanced_accuracy_score(testY, pred_labels))
+    # print("Model:{} LOO Acc:{:.2f}".format(model_name, np.mean(loo_accs)))
 
 
 

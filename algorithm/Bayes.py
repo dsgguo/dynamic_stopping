@@ -1,18 +1,26 @@
 import sys
-sys.path.append("D:\Duan_code\MetaBCI\MetaBCI")
+sys.path.append(r"d:\User_code\dsg\duanshunguo\MetaBCI\MetaBCI-master")
 import numpy as np
 from scipy.stats import gaussian_kde
 from scipy.integrate import quad
-
+from sklearn.dummy import DummyClassifier
+from sklearn.base import clone
 from metabci.brainda.algorithms.utils.model_selection import (
     EnhancedLeaveOneGroupOut)
 
+class DummyKDE:
+    def __init__(self,constant=0):
+        self.dummy = DummyClassifier(strategy='constant', constant=constant)
+        self.dummy.fit(np.zeros((1)),np.zeros(1))
+    def __call__(self,x):
+        X = np.array(x).reshape(-1,1)
+        dummy_prob = self.dummy.predict(X)
+        return dummy_prob
 
-class DynamicStop:
-    def __init__(self,decoder,train_data,train_label,Yf=None):
+
+class Bayes:
+    def __init__(self,decoder,Yf=None):
         self.decoder = decoder#FBTRCA
-        self.data = train_data
-        self.label = train_label
         self.model_dict = {}  # 初始化模型字典
         self.Yf = Yf
         
@@ -29,35 +37,40 @@ class DynamicStop:
                 extracted['incorrect'].append(dm_i[i])
         return extracted
     
-    def train(self,duration):
-        self.estimator = self.decoder.fit(self.data,self.label,Yf=self.Yf)
+    def train(self,X,Y,duration):
+        data = X
+        label = Y
         spliter = EnhancedLeaveOneGroupOut(return_validate=False)
         aggregated_dm = {'correct': [], 'incorrect': []}  # 初始化空字典
-      
-        for train_ind, test_ind in spliter.split(self.data, y=self.label):
-            X_train, Y_train = np.copy(self.data[train_ind]), np.copy(self.label[train_ind])
-            X_test, Y_test = np.copy(self.data[test_ind]), np.copy(self.label[test_ind])
-            model = self.decoder.fit(X_train, Y_train, Yf=self.Yf ) 
+        prob_list = []
+        for train_ind, test_ind in spliter.split(data, y=label):
+            X_train, Y_train = np.copy(data[train_ind]), np.copy(label[train_ind])
+            X_test, Y_test = np.copy(data[test_ind]), np.copy(label[test_ind])
+            model = clone(self.decoder).fit(X_train, Y_train, Yf=self.Yf ) 
             pred_labels = model.predict(X_test)
             rhos = model.transform(X_test)
             rho_i = {i: rhos[i, :] for i , _ in enumerate(rhos)} 
             # dm_i = np.array([rho_i[i][np.argmax(rho_i[i])] / sum(rho_i[i]) for i in rho_i])
             dm_i = np.array([rho_i[i][np.argmax(rho_i[i])] for i in rho_i])
             extracted_dm = self._extract_dm(pred_labels,Y_test,dm_i)
-            
+            sub_prob = len(extracted_dm['correct'])/(len(extracted_dm['correct'])+
+                                              len(extracted_dm['incorrect']))
+            prob_list.append(sub_prob)
             for key in aggregated_dm:
                 aggregated_dm[key].extend(extracted_dm[key])
         dm0 = aggregated_dm['correct']#正确的dm_i      
         dm1 = aggregated_dm['incorrect']#错误的dm_i
         print(f"dm0 length: {len(dm0)}, dm1 length: {len(dm1)}")
         kde0 = gaussian_kde(dm0)
-        kde1 = gaussian_kde(dm1)
-        prob = len(aggregated_dm['correct'])/(len(aggregated_dm['correct'])+
-                                              len(aggregated_dm['incorrect']))
+        if len(dm1) > 2:
+            kde1 = gaussian_kde(dm1)
+        else:
+            kde1 = DummyKDE(0)
+        prob = np.mean(prob_list)
         
          # 将结果存储在模型字典中
-        self.model_dict[duration] = {'kde0': kde0, 'kde1': kde1, 'prob': prob}
-        print(f"model_dict: {self.model_dict}")
+        estimator = clone(self.decoder).fit(data,label,Yf=self.Yf)
+        self.model_dict[duration] = {'kde0': kde0, 'kde1': kde1, 'prob': prob,"estimator":estimator}
         return kde0,kde1,prob,dm0,dm1
     
     def _get_model(self,duration):
@@ -65,12 +78,13 @@ class DynamicStop:
         kde0 = model_info['kde0']
         kde1 = model_info['kde1']
         prob = model_info['prob']
-        return kde0,kde1,prob
+        estimator = model_info['estimator']
+        return kde0,kde1,prob,estimator
     
     def validate(self,testX,duration):
         if duration in self.model_dict:
-            kde0,kde1,_ = self._get_model(duration)
-            rhos = self.estimator.transform(testX)
+            kde0,kde1,_,estimator = self._get_model(duration)
+            rhos = estimator.transform(testX)
             rho_i = {i: rhos[i, :] for i , _ in enumerate(rhos)} 
             # dm_i = np.array([rho_ i[i][np.argmax(rho_i[i])] / sum(rho_i[i]) for i in rho_i])
             dm_i = np.array([rho_i[i][np.argmax(rho_i[i])] for i in rho_i])
@@ -88,16 +102,17 @@ class DynamicStop:
 
     def decide(self,data,duration):
         if duration in self.model_dict:
-            kde0,kde1,prob = self._get_model(duration)
+            kde0,kde1,prob,estimator = self._get_model(duration)
             
-            rhos = self.estimator.transform(data)
+            rhos = estimator.transform(data)
             rho_i = {i: rhos[i, :] for i , _ in enumerate(rhos)} 
             dm_i = np.array([rho_i[i][np.argmax(rho_i[i])] for i in rho_i])
-            p_H0,_ = quad(kde0,dm_i,dm_i+0.001)
-            p_H1,_ = quad(kde1,dm_i,dm_i+0.001)
-            p_thre = prob*p_H0/(prob*p_H0+(1-prob)*p_H1)
-            print(f"p_H0: {p_H0}, p_H1: {p_H1}, p_thre: {p_thre}, prob: {prob}")
-            if prob > p_thre or duration > 1:
+            p_H0 = kde0(dm_i)
+            p_H1 = kde1(dm_i)
+            p_pre = prob*p_H0/(prob*p_H0+(1-prob)*p_H1)
+            p_thre = 0.95
+            print(f"p_H0: {p_H0}, p_H1: {p_H1}, p_thre: {p_pre}, prob: {prob}")
+            if p_pre >= p_thre or duration > 1 :
                 return True
             else:
                 return False
