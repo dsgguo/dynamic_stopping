@@ -82,53 +82,25 @@ X, y, meta = paradigm.get_data(
     n_jobs=1,
     verbose=False)
 
+duration = 0.5
 loo_indices = generate_loo_indices(meta)
-        
-Ds = Bayes(models['fbtrca'])
-for duration in [0.5,0.6,0.7,0.8,0.9,1.0]:
-    duration = duration 
-    print(f"Train_Duration: {duration}")
-    filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
-    filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
-  
-    train_ind, validate_ind, _ = match_loo_indices(
-        5, meta, loo_indices)
-    train_ind = np.concatenate([train_ind, validate_ind])
 
-    trainX, trainY = filterX[train_ind], filterY[train_ind]
-    Ds.train(trainX,trainY,duration)
-        
-    # kde0,kde1,prob,dm0,dm1 = Ds.train(trainX,trainY,duration)
-    # p_H0_total,_ = quad(kde0,dm0[np.argmin(dm0)],dm0[np.argmax(dm0)])
-    # p_H1_total,_ = quad(kde1,dm1[np.argmin(dm1)],dm1[np.argmax(dm1)])
-    
-tlabels = []
-plabels = []
-for i in range(0,40):
-    filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+5))]),np.copy(y)
-    filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
-    _, _, test_ind = match_loo_indices(
-                     5, meta, loo_indices)
-    testX, testY = filterX[test_ind], filterY[test_ind]
-    bufferX = testX[i:i+1,:,:]
-    bufferY = testY[i:i+1]
-    a = 0.5
-    default_duration = round(a,2)
-    trail = bufferX[:,:,0:int(srate*default_duration)]
-    bool,label = Ds.decide(trail,default_duration)
-    while not bool:
-        print("长度不足,增加0.1s")
-        a += 0.1
-        default_duration = round(a,2)
-        trail = bufferX[:,:,0:int(srate*default_duration)]
-        bool,label = Ds.decide(trail,default_duration)
-    
-    tlabels.append(bufferY[0])
-    plabels.append(label)
-    print(f"Current duration: {default_duration}")    
-     # 记录label
-    print(f"Trail {i}: Label = {label}, Duration = {default_duration}")
-acc = analyze.acc(plabels, tlabels)
-itr = analyze.ITR(40, acc, 0.5)
+filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
+filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
+
+train_ind, validate_ind, test_ind = match_loo_indices(
+    5, meta, loo_indices)
+train_ind = np.concatenate([train_ind, validate_ind])
+
+trainX, trainY = filterX[train_ind], filterY[train_ind]
+testX, testY = filterX[test_ind], filterY[test_ind]
+
+model = models['fbtrca']
+model.fit(trainX, trainY)
+plabels = model.predict(testX)
+acc = analyze.acc(testY, plabels)
+print(acc)
+
+
 
 

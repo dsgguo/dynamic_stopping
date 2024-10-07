@@ -1,8 +1,7 @@
 import sys
-sys.path.append(r"d:\User_code\dsg\duanshunguo\MetaBCI\MetaBCI-master")
+sys.path.append(r"D:\Duan_code\MetaBCI\MetaBCI")
 import numpy as np
 from scipy.stats import gaussian_kde
-from scipy.integrate import quad
 from sklearn.dummy import DummyClassifier
 from sklearn.base import clone
 from metabci.brainda.algorithms.utils.model_selection import (
@@ -60,7 +59,7 @@ class Bayes:
                 aggregated_dm[key].extend(extracted_dm[key])
         dm0 = aggregated_dm['correct']#正确的dm_i      
         dm1 = aggregated_dm['incorrect']#错误的dm_i
-        print(f"dm0 length: {len(dm0)}, dm1 length: {len(dm1)}")
+        # print(f"dm0 length: {len(dm0)}, dm1 length: {len(dm1)}")
         kde0 = gaussian_kde(dm0)
         if len(dm1) > 2:
             kde1 = gaussian_kde(dm1)
@@ -105,16 +104,17 @@ class Bayes:
             kde0,kde1,prob,estimator = self._get_model(duration)
             
             rhos = estimator.transform(data)
+            label = estimator.predict(data)
             rho_i = {i: rhos[i, :] for i , _ in enumerate(rhos)} 
             dm_i = np.array([rho_i[i][np.argmax(rho_i[i])] for i in rho_i])
             p_H0 = kde0(dm_i)
             p_H1 = kde1(dm_i)
             p_pre = prob*p_H0/(prob*p_H0+(1-prob)*p_H1)
             p_thre = 0.95
-            print(f"p_H0: {p_H0}, p_H1: {p_H1}, p_thre: {p_pre}, prob: {prob}")
+            # print(f"p_H0: {p_H0}, p_H1: {p_H1}, p_thre: {p_pre}, prob: {prob}")
             if p_pre >= p_thre or duration > 1 :
-                return True
+                return True,label
             else:
-                return False
+                return False,label
         else:
             raise ValueError(f"No model found for duration: {duration}")
