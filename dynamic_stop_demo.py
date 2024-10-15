@@ -2,7 +2,7 @@
 #
 # Authors: Duan Shunguo<dsg@tju.edu.cn>
 # Date: 2024/9/1
-# -*- coding: utf-8 -*-
+
 
 from collections import OrderedDict
 import numpy as np
@@ -20,6 +20,7 @@ from metabci.brainda.algorithms.decomposition import (
     generate_filterbank, generate_cca_references)
 from metabci.brainda.algorithms.utils.model_selection import (
     EnhancedLeaveOneGroupOut)
+from sklearn.pipeline import clone
 
 from scipy.stats import gaussian_kde
 import matplotlib.pyplot as plt
@@ -27,9 +28,9 @@ from scipy.integrate import quad, trapz
 from algorithm.Bayes import Bayes
 from algorithm import analyze
 dataset = Wang2016()
-delay = 0.14 # seconds
+delay = 0.14 
 channels = ['PZ', 'PO5', 'PO3', 'POZ', 'PO4', 'PO6', 'O1', 'OZ', 'O2']
-srate = 250 # Hz
+srate = 250 
 
 n_bands = 3
 n_harmonics = 5
@@ -42,7 +43,6 @@ start_pnt = dataset.events[events[0]][1][0]
 paradigm = SSVEP(
     srate=srate, 
     channels=channels, 
-    # intervals=[(start_pnt+delay, start_pnt+delay+duration+0.1)], # more seconds for TDCA 
     events=events)
 
 wp = [[8*i, 90] for i in range(1, n_bands+1)]
@@ -62,17 +62,17 @@ paradigm.register_data_hook(data_hook)
 set_random_seeds(64)
 l = 5
 models = OrderedDict([
-    # ('fbscca', FBSCCA(
-    #         filterbank, filterweights=filterweights)),
-    # ('fbecca', FBECCA(
-    #         filterbank, filterweights=filterweights)),
-    # ('fbdsp', FBDSP(
-    #         filterbank, filterweights=filterweights)),
+    ('fbscca', FBSCCA(
+            filterbank, filterweights=filterweights)),
+    ('fbecca', FBECCA(
+            filterbank, filterweights=filterweights)),
+    ('fbdsp', FBDSP(
+            filterbank, filterweights=filterweights)),
     ('fbtrca', FBTRCA(
             filterbank, filterweights=filterweights)),
-    # ('fbtdca', FBTDCA(
-    #         filterbank, l, n_components=8, 
-    #         filterweights=filterweights)),
+    ('fbtdca', FBTDCA(
+            filterbank, l, n_components=8, 
+            filterweights=filterweights)),
 ])
 
 X, y, meta = paradigm.get_data(
@@ -83,52 +83,59 @@ X, y, meta = paradigm.get_data(
     verbose=False)
 
 loo_indices = generate_loo_indices(meta)
-        
-Ds = Bayes(models['fbtrca'])
-for duration in [0.5,0.6,0.7,0.8,0.9,1.0]:
-    duration = duration 
-    print(f"Train_Duration: {duration}")
-    filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
-    filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
-  
-    train_ind, validate_ind, _ = match_loo_indices(
-        5, meta, loo_indices)
-    train_ind = np.concatenate([train_ind, validate_ind])
 
-    trainX, trainY = filterX[train_ind], filterY[train_ind]
-    Ds.train(trainX,trainY,duration)
-        
-    # kde0,kde1,prob,dm0,dm1 = Ds.train(trainX,trainY,duration)
-    # p_H0_total,_ = quad(kde0,dm0[np.argmin(dm0)],dm0[np.argmax(dm0)])
-    # p_H1_total,_ = quad(kde1,dm1[np.argmin(dm1)],dm1[np.argmax(dm1)])
+for model_name in models():
+    Ds = Bayes(clone(models[model_name]))
+    for duration in [0.5,0.6,0.7,0.8,0.9,1.0]:
+        duration = duration 
+        print(f"Currunt_Train_Duration: {duration}")
+        if model_name == 'fbtdca':
+            filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
+        else:
+            filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
     
-tlabels = []
-plabels = []
-for i in range(0,40):
-    filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+5))]),np.copy(y)
-    filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
-    _, _, test_ind = match_loo_indices(
-                     5, meta, loo_indices)
-    testX, testY = filterX[test_ind], filterY[test_ind]
-    bufferX = testX[i:i+1,:,:]
-    bufferY = testY[i:i+1]
-    a = 0.5
-    default_duration = round(a,2)
-    trail = bufferX[:,:,0:int(srate*default_duration)]
-    bool,label = Ds.decide(trail,default_duration)
-    while not bool:
-        print("长度不足,增加0.1s")
-        a += 0.1
+        filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
+    
+        train_ind, validate_ind, _ = match_loo_indices(
+            5, meta, loo_indices)
+        train_ind = np.concatenate([train_ind, validate_ind])
+
+        trainX, trainY = filterX[train_ind], filterY[train_ind]
+        Ds.train(trainX,trainY,duration)
+            
+    tlabels = []
+    plabels = []
+    T_time = []
+    for i in range(0,40):
+        if model_name == 'fbtdca':
+            filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
+        else:
+            filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
+    
+        filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
+        _, _, test_ind = match_loo_indices(
+                        5, meta, loo_indices)
+        testX, testY = filterX[test_ind], filterY[test_ind]
+        bufferX = testX[i:i+1,:,:]
+        bufferY = testY[i:i+1]
+        a = 0.5
         default_duration = round(a,2)
         trail = bufferX[:,:,0:int(srate*default_duration)]
         bool,label = Ds.decide(trail,default_duration)
-    
-    tlabels.append(bufferY[0])
-    plabels.append(label)
-    print(f"Current duration: {default_duration}")    
-     # 记录label
-    print(f"Trail {i}: Label = {label}, Duration = {default_duration}")
-acc = analyze.acc(plabels, tlabels)
-itr = analyze.ITR(40, acc, 0.5)
-
+        while not bool:
+            print("insufficient length, add 0.1s")
+            a += 0.1
+            default_duration = round(a,2)
+            trail = bufferX[:,:,0:int(srate*default_duration)]
+            bool,label = Ds.decide(trail,default_duration)
+        
+        tlabels.append(bufferY[0])
+        plabels.append(label)
+        T_time.append(default_duration)
+        print(f"Current duration: {default_duration}")    
+        print(f"Trail {i}: Label = {label}, Duration = {default_duration}")
+    acc = analyze.acc(plabels, tlabels)
+    itr = analyze.ITR(40, acc, np.mean(T_time))
+    print(np.mean(T_time))
+    print(f"Model:{model_name}, Acc: {acc}, ITR: {itr}")
 

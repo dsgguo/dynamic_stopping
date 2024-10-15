@@ -99,7 +99,8 @@ model = models['fbtrca']
 model.fit(trainX, trainY)
 plabels = model.predict(testX)
 acc = analyze.acc(testY, plabels)
-print(acc)
+itr = analyze.ITR(40, acc,0.5)
+print(acc,itr)
 
 
 
