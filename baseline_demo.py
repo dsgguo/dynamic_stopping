@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
-#
-# Authors: Duan Shunguo<dsg@tju.edu.cn>
-# Date: 2024/9/1
-# -*- coding: utf-8 -*-
+# SSVEP Classification Demo
 
 from collections import OrderedDict
 import numpy as np
 from scipy.signal import sosfiltfilt
-from sklearn.metrics import balanced_accuracy_score
-import sys
-sys.path.append(r"D:\Duan_code\MetaBCI\MetaBCI")
+from sklearn.pipeline import clone
+
 from metabci.brainda.datasets import Wang2016
 from metabci.brainda.paradigms import SSVEP
 from metabci.brainda.algorithms.utils.model_selection import (
@@ -18,33 +14,32 @@ from metabci.brainda.algorithms.utils.model_selection import (
 from metabci.brainda.algorithms.decomposition import (
     FBTRCA, FBTDCA, FBSCCA, FBECCA, FBDSP,
     generate_filterbank, generate_cca_references)
-from metabci.brainda.algorithms.utils.model_selection import (
-    EnhancedLeaveOneGroupOut)
+from metabci.brainda.utils.performance import Performance
+import time 
 
-from scipy.stats import gaussian_kde
-import matplotlib.pyplot as plt
-from scipy.integrate import quad, trapz
-from algorithm.Bayes import Bayes
-from algorithm import analyze
+time1 = time.time()
 dataset = Wang2016()
 delay = 0.14 # seconds
 channels = ['PZ', 'PO5', 'PO3', 'POZ', 'PO4', 'PO6', 'O1', 'OZ', 'O2']
 srate = 250 # Hz
-
+duration = 0.2 # seconds
 n_bands = 3
 n_harmonics = 5
 events = sorted(list(dataset.events.keys()))
 freqs = [dataset.get_freq(event) for event in events]
 phases = [dataset.get_phase(event) for event in events]
 
+Yf = generate_cca_references(
+    freqs, srate, duration, 
+    phases=None, 
+    n_harmonics=n_harmonics)
+print(Yf.shape)
 start_pnt = dataset.events[events[0]][1][0]
-
 paradigm = SSVEP(
     srate=srate, 
     channels=channels, 
-    # intervals=[(start_pnt+delay, start_pnt+delay+duration+0.1)], # more seconds for TDCA 
     events=events)
-
+print(duration+0.1)
 wp = [[8*i, 90] for i in range(1, n_bands+1)]
 ws = [[8*i-2, 95] for i in range(1, n_bands+1)]
 filterbank = generate_filterbank(
@@ -70,9 +65,9 @@ models = OrderedDict([
     #         filterbank, filterweights=filterweights)),
     ('fbtrca', FBTRCA(
             filterbank, filterweights=filterweights)),
-    # ('fbtdca', FBTDCA(
-    #         filterbank, l, n_components=8, 
-    #         filterweights=filterweights)),
+    ('fbtdca', FBTDCA(
+            filterbank, l, n_components=8, 
+            filterweights=filterweights)),
 ])
 
 X, y, meta = paradigm.get_data(
@@ -82,26 +77,34 @@ X, y, meta = paradigm.get_data(
     n_jobs=1,
     verbose=False)
 
-duration = 0.5
+set_random_seeds(42)
 loo_indices = generate_loo_indices(meta)
 
-filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
-filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
+for model_name in models:
+    if model_name == 'fbtdca':
+            filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
+    else:
+        filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
+    
+    filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
 
-train_ind, validate_ind, test_ind = match_loo_indices(
-    5, meta, loo_indices)
-train_ind = np.concatenate([train_ind, validate_ind])
+    
+    train_ind, validate_ind, test_ind = match_loo_indices(
+        5, meta, loo_indices)
+    train_ind = np.concatenate([train_ind, validate_ind])
 
-trainX, trainY = filterX[train_ind], filterY[train_ind]
-testX, testY = filterX[test_ind], filterY[test_ind]
+    trainX, trainY = filterX[train_ind], filterY[train_ind]
+    testX, testY = filterX[test_ind], filterY[test_ind]
 
-model = models['fbtrca']
-model.fit(trainX, trainY)
-plabels = model.predict(testX)
-acc = analyze.acc(testY, plabels)
-itr = analyze.ITR(40, acc,0.5)
-print(acc,itr)
-
-
+    model = clone(models[model_name]).fit(
+        trainX, trainY,
+        Yf=Yf
+    )
+    pred_labels = model.predict(testX)
+    
+    performance = Performance(estimators_list=["Acc","tITR"],Tw=1)
+    results = performance.evaluate(y_true=np.array(testY),y_pred=np.array(pred_labels))
+    time2 = time.time()
+    print(f"Model: {model_name}, results: {results}, time: {time2-time1}")
 
 

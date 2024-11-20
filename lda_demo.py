@@ -8,8 +8,7 @@ from collections import OrderedDict
 import numpy as np
 from scipy.signal import sosfiltfilt
 from sklearn.metrics import balanced_accuracy_score
-import sys
-sys.path.append(r"D:\Duan_code\MetaBCI\MetaBCI")
+from sklearn.pipeline import clone
 from metabci.brainda.datasets import Wang2016
 from metabci.brainda.paradigms import SSVEP
 from metabci.brainda.algorithms.utils.model_selection import (
@@ -18,15 +17,11 @@ from metabci.brainda.algorithms.utils.model_selection import (
 from metabci.brainda.algorithms.decomposition import (
     FBTRCA, FBTDCA, FBSCCA, FBECCA, FBDSP,
     generate_filterbank, generate_cca_references)
-from metabci.brainda.algorithms.utils.model_selection import (
-    EnhancedLeaveOneGroupOut)
-from sklearn.pipeline import clone
+from metabci.brainda.utils.performance import Performance
 
-from scipy.stats import gaussian_kde
-import matplotlib.pyplot as plt
-from scipy.integrate import quad, trapz
-from algorithm.Bayes import Bayes
-from algorithm import analyze
+from algorithm import LDA
+
+
 dataset = Wang2016()
 delay = 0.14 
 channels = ['PZ', 'PO5', 'PO3', 'POZ', 'PO4', 'PO6', 'O1', 'OZ', 'O2']
@@ -84,16 +79,23 @@ X, y, meta = paradigm.get_data(
 
 loo_indices = generate_loo_indices(meta)
 
-for model_name in models():
-    Ds = Bayes(clone(models[model_name]))
+for model_name in models:
+    Ds = LDA.LDA(clone(models[model_name]))
     for duration in [0.5,0.6,0.7,0.8,0.9,1.0]:
+        # [0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]:
         duration = duration 
-        print(f"Currunt_Train_Duration: {duration}")
+        Yf = generate_cca_references(
+        freqs, srate, duration, 
+        phases=None, 
+        n_harmonics=n_harmonics)
+        
+        print(f"Cunrrunt_model:{model_name},Currunt_Train_Duration: {duration}")
         if model_name == 'fbtdca':
             filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
         else:
             filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
-    
+        
+
         filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
     
         train_ind, validate_ind, _ = match_loo_indices(
@@ -101,41 +103,52 @@ for model_name in models():
         train_ind = np.concatenate([train_ind, validate_ind])
 
         trainX, trainY = filterX[train_ind], filterY[train_ind]
-        Ds.train(trainX,trainY,duration)
+        Ds.train(trainX,trainY,duration,Yf)
             
     tlabels = []
     plabels = []
     T_time = []
+   
     for i in range(0,40):
         if model_name == 'fbtdca':
             filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
         else:
             filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))]), np.copy(y)
-    
+        
+
         filterX = filterX - np.mean(filterX, axis=-1, keepdims=True)
         _, _, test_ind = match_loo_indices(
                         5, meta, loo_indices)
         testX, testY = filterX[test_ind], filterY[test_ind]
+        # print(testY)
         bufferX = testX[i:i+1,:,:]
         bufferY = testY[i:i+1]
         a = 0.5
         default_duration = round(a,2)
-        trail = bufferX[:,:,0:int(srate*default_duration)]
-        bool,label = Ds.decide(trail,default_duration)
+        if model_name == 'fbtdca':
+            trail = bufferX[:,:,0:int(srate*default_duration)+l]
+        else:
+            trail = bufferX[:,:,0:int(srate*default_duration)]
+        
+        bool,label = Ds.decide(trail,default_duration,1)
         while not bool:
             print("insufficient length, add 0.1s")
             a += 0.1
             default_duration = round(a,2)
-            trail = bufferX[:,:,0:int(srate*default_duration)]
-            bool,label = Ds.decide(trail,default_duration)
+            if model_name == 'fbtdca':
+                trail = bufferX[:,:,0:int(srate*default_duration)+l]
+            else:
+                trail = bufferX[:,:,0:int(srate*default_duration)]
+            bool,label = Ds.decide(trail,default_duration,1)
         
         tlabels.append(bufferY[0])
         plabels.append(label)
         T_time.append(default_duration)
         print(f"Current duration: {default_duration}")    
-        print(f"Trail {i}: Label = {label}, Duration = {default_duration}")
-    acc = analyze.acc(plabels, tlabels)
-    itr = analyze.ITR(40, acc, np.mean(T_time))
-    print(np.mean(T_time))
-    print(f"Model:{model_name}, Acc: {acc}, ITR: {itr}")
+        # print(f"Trail {i}: Label = {label}, Duration = {default_duration}")
+    
+    performance = Performance(estimators_list=["Acc","tITR"],Tw=np.mean(T_time))
+    results = performance.evaluate(y_true=np.array(tlabels),y_pred=np.array(plabels))
+    print(f"Model: {model_name}, results: {results}")
+    
 

@@ -35,11 +35,12 @@ class Bayes:
         decoder: The decoder for EEG to be used.
         model_dict (dict): A dictionary to store Estimator, KDE_models and the Prior possibility.
     """
-    def __init__(self,decoder,t_max=1,user_mode=0):
+    def __init__(self,decoder,t_max=1,srate=1000,user_mode=0):
         self.decoder = decoder
         self.model_dict = {}
         self.t_max = t_max
-        self.user_mode = user_mode 
+        self.user_mode = user_mode
+        self.srate = srate 
 
     def _save_model(self, filename):
         """
@@ -82,6 +83,49 @@ class Bayes:
             else:
                 extracted['incorrect'].append(dm_i[i])
         return extracted
+    
+    def _get_Us(self,estimator):
+        """
+        get the Us from the estimator.
+        """
+        Us_dict = {i:estimator.estimators_[i].Us_ for i in range(len(estimator.estimators_))}
+
+        return Us_dict
+    
+    def _set_Us(self,estimator,Us_dict):
+        """
+        set the Us to the estimator.
+        """
+        for i in range(len(estimator.estimators_)):
+            setattr(estimator.estimators_[i],'Us_',Us_dict[i])
+        return None
+    
+    def _get_templates(self,estimator):
+        templates_dict = {i:estimator.estimators_[i].templates_ for i in range(len(estimator.estimators_))}
+        return templates_dict
+    
+    def _set_templates(self,estimator,templates_dict,duration):
+        for i in range(len(estimator.estimators_)):
+            setattr(estimator.estimators_[i],'templates_',templates_dict[i][:,:,:int(duration*self.srate)])
+        return None
+    
+    def pre_train(self,X,Y,Yf=None):
+        """
+        Pre-trains the estimator using the provided data.
+
+        Args:
+            X (array-like): Training data.
+            Y (array-like): Training labels.
+            Yf (array-like, optional): Additional training data. Defaults to None.
+
+        Returns:
+            object: The pre-trained estimator.
+        """
+        estimator = clone(self.decoder).fit(X,Y,Yf=Yf)
+        max_Us_dict = self._get_Us(estimator)
+        max_templates_dict = self._get_templates(estimator)
+        self.model_dict['pre_train'] = {'Us':max_Us_dict,'templates':max_templates_dict,'estimator':estimator}
+        return estimator
     
     def train(self,X,Y,duration,Yf=None,filename=None):
         """
@@ -129,13 +173,10 @@ class Bayes:
             kde1 = DummyKDE(0)
         prob = np.mean(prob_list)
         
-        
-        estimator = clone(self.decoder).fit(data,label,Yf=Yf)
-        self.model_dict[duration] = {'kde0': kde0, 'kde1': kde1, 'prob': prob,"estimator":estimator}
-        
+        self.model_dict[duration] = {'kde0': kde0, 'kde1': kde1, 'prob': prob}
         if self.user_mode == 1 and filename is not None:
             self._save_model(filename)
-        return kde0,kde1,prob,dm0,dm1
+        return kde0,kde1,prob
     
     def _get_model(self,duration):
         """
@@ -151,8 +192,10 @@ class Bayes:
         kde0 = model_info['kde0']
         kde1 = model_info['kde1']
         prob = model_info['prob']
-        estimator = model_info['estimator']
-        return kde0,kde1,prob,estimator
+        Us_dict = self.model_dict['pre_train']['Us']
+        templates_dict = self.model_dict['pre_train']['templates']
+        estimator = self.model_dict['pre_train']['estimator']
+        return kde0,kde1,prob,Us_dict,templates_dict,estimator
     
     def validate(self,testX,duration):
         """
@@ -166,7 +209,10 @@ class Bayes:
             float: Ratio of correctly classified samples.
         """
         if duration in self.model_dict:
-            kde0,kde1,_,estimator = self._get_model(duration)
+            kde0,kde1,_,Us_dict,templates_dict,estimator = self._get_model(duration)
+            self._set_Us(estimator,Us_dict)
+            self._set_templates(estimator,templates_dict,duration)
+            
             rhos = estimator.transform(testX)
             rho_i = {i: rhos[i, :] for i , _ in enumerate(rhos)} 
             dm_i = np.array([rho_i[i][np.argmax(rho_i[i])] for i in rho_i])
@@ -203,7 +249,10 @@ class Bayes:
             self._load_model(filename)
         
         if duration in self.model_dict:
-            kde0,kde1,prob,estimator = self._get_model(duration)
+            kde0,kde1,prob,Us_dict,templates_dict,estimator = self._get_model(duration)
+            
+            self._set_Us(estimator,Us_dict)
+            self._set_templates(estimator,templates_dict,duration)
             
             rhos = estimator.transform(data)
             label = estimator.predict(data)
