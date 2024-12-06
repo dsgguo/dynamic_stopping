@@ -17,12 +17,11 @@ from metabci.brainda.algorithms.decomposition import (
 from metabci.brainda.utils.performance import Performance
 import time 
 
-time1 = time.time()
 dataset = Wang2016()
 delay = 0.14 # seconds
 channels = ['PZ', 'PO5', 'PO3', 'POZ', 'PO4', 'PO6', 'O1', 'OZ', 'O2']
 srate = 250 # Hz
-duration = 0.2 # seconds
+duration = 1 # seconds
 n_bands = 3
 n_harmonics = 5
 events = sorted(list(dataset.events.keys()))
@@ -33,13 +32,13 @@ Yf = generate_cca_references(
     freqs, srate, duration, 
     phases=None, 
     n_harmonics=n_harmonics)
-print(Yf.shape)
+
 start_pnt = dataset.events[events[0]][1][0]
 paradigm = SSVEP(
     srate=srate, 
     channels=channels, 
     events=events)
-print(duration+0.1)
+
 wp = [[8*i, 90] for i in range(1, n_bands+1)]
 ws = [[8*i-2, 95] for i in range(1, n_bands+1)]
 filterbank = generate_filterbank(
@@ -57,12 +56,12 @@ paradigm.register_data_hook(data_hook)
 set_random_seeds(64)
 l = 5
 models = OrderedDict([
-    # ('fbscca', FBSCCA(
-    #         filterbank, filterweights=filterweights)),
-    # ('fbecca', FBECCA(
-    #         filterbank, filterweights=filterweights)),
-    # ('fbdsp', FBDSP(
-    #         filterbank, filterweights=filterweights)),
+    ('fbscca', FBSCCA(
+            filterbank, filterweights=filterweights)),
+    ('fbecca', FBECCA(
+            filterbank, filterweights=filterweights)),
+    ('fbdsp', FBDSP(
+            filterbank, filterweights=filterweights)),
     ('fbtrca', FBTRCA(
             filterbank, filterweights=filterweights)),
     ('fbtdca', FBTDCA(
@@ -81,6 +80,7 @@ set_random_seeds(42)
 loo_indices = generate_loo_indices(meta)
 
 for model_name in models:
+    time1 = time.time()
     if model_name == 'fbtdca':
             filterX, filterY = np.copy(X[..., int(srate*delay):int(srate*(delay+duration))+l]), np.copy(y)
     else:
