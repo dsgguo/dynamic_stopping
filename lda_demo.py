@@ -21,7 +21,7 @@ from metabci.brainda.utils.performance import Performance
 
 from algorithm import LDA
 
-
+time1 = time.time()
 dataset = Wang2016()
 delay = 0.14 
 channels = ['PZ', 'PO5', 'PO3', 'POZ', 'PO4', 'PO6', 'O1', 'OZ', 'O2']
@@ -146,9 +146,10 @@ for model_name in models:
         T_time.append(default_duration)
         print(f"Current duration: {default_duration}")    
         # print(f"Trail {i}: Label = {label}, Duration = {default_duration}")
-    
+
+    time2 = time.time()
     performance = Performance(estimators_list=["Acc","tITR"],Tw=np.mean(T_time))
     results = performance.evaluate(y_true=np.array(tlabels),y_pred=np.array(plabels))
-    print(f"Model: {model_name}, results: {results}")
+    print(f"Model: {model_name}, results: {results}，time: {time2-time1}")
     
 
