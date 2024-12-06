@@ -19,7 +19,7 @@ from metabci.brainda.algorithms.decomposition import (
 from metabci.brainda.utils.performance import Performance
 
 
-from algorithm import bayes
+from algorithm import bayes_w
 import time
 
 time1 = time.time()
@@ -89,7 +89,7 @@ dict_threshold = {
 }
 
 for model_name in models:
-    Ds = bayes.Bayes(clone(models[model_name]),srate=250)
+    Ds = bayes_w.Bayes(clone(models[model_name]),srate=250)
     for duration in np.round(np.arange(0.2, 1.1, 0.1),2):
         duration = duration 
         Yf = generate_cca_references(
