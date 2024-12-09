@@ -57,8 +57,8 @@ paradigm.register_data_hook(data_hook)
 set_random_seeds(64)
 l = 5
 models = OrderedDict([
-    ('fbscca', FBSCCA(
-            filterbank, filterweights=filterweights)),
+    # ('fbscca', FBSCCA(
+    #         filterbank, filterweights=filterweights)),
     ('fbecca', FBECCA(
             filterbank, filterweights=filterweights)),
     # ('fbdsp', FBDSP(

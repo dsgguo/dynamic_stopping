@@ -1,8 +1,20 @@
 # -*- coding: utf-8 -*-
-#
-# Authors: Duan Shunguo<dsg@tju.edu.cn>
-# Date: 2024/9/1
 
+"""
+This module contains the implementation of the Bayes-based Dynamic Stopping Algorithm and a dummy KDE class.
+
+Classes:
+    DummyKDE: A dummy KDE class that uses a DummyClassifier to come up with insufficient negative samples.
+    
+    Bayes: Bayes-based Dynamic Stopping Algorithm can determine in real-time whether the signal quality is 
+    sufficient based on the current length of EEG data and output the result, achieving higher accuracy and 
+    signal transmission rate in a shorter time.
+
+Authors: Duan Shunguo<dsg@tju.edu.cn>
+
+Date: 2024/9/1
+
+"""
 import numpy as np
 from scipy.stats import gaussian_kde
 from sklearn.dummy import DummyClassifier
@@ -13,15 +25,39 @@ import joblib
 
 class DummyKDE:
     """
-    A dummy KDE class that uses a DummyClassifier to come up with insufficent negative samples .
+    A dummy KDE class that uses a DummyClassifier to come up with insufficient negative samples.
 
     Attributes:
         dummy (DummyClassifier): A dummy classifier with a constant strategy.
+
+    Methods:
+        __call__(x): Predicts the dummy probability for the input data.
+
+    Example:
+        >>> kde = DummyKDE(constant=0)
+        >>> kde([1, 2, 3])
+        array([0, 0, 0])
     """
-    def __init__(self,constant=0):
+    def __init__(self, constant=0):
+        """
+        Initializes the DummyKDE with a constant value for the DummyClassifier.
+
+        Parameters:
+            constant (int): The constant value used by the DummyClassifier.
+        """
         self.dummy = DummyClassifier(strategy='constant', constant=constant)
         self.dummy.fit(np.zeros((1)),np.zeros(1))
-    def __call__(self,x):
+        
+    def __call__(self, x):
+        """
+        Predicts the dummy probability for the input data.
+
+        Parameters:
+            x (array-like): The input data.
+
+        Returns:
+            array: The predicted dummy probabilities.
+        """
         X = np.array(x).reshape(-1,1)
         dummy_prob = self.dummy.predict(X)
         return dummy_prob
@@ -29,23 +65,44 @@ class DummyKDE:
 
 class Bayes:
     """
-    The Bayes_based Dynamic Stopping Algorithm for handling Bayesian decoding.
+    The Bayes-based Dynamic Stopping Algorithm for handling Bayesian decoding.
 
     Attributes:
         decoder: The decoder for EEG to be used.
         model_dict (dict): A dictionary to store Estimator, KDE_models and the Prior possibility.
+        user_mode (int): Mode of the user, 0 for normal, 1 for saving model text file.
+
+    Methods:
+        _save_model(filename): Saves the model to a file.
+        _load_model(filename): Loads the model from a file.
+        _extract_dm(pred_labels, Y_test, dm_i): Extracts decision metrics from predicted and true labels.
+        train(X, Y, duration, Yf=None, filename=None): Trains the KDE model and estimator using the provided data.
+        _get_model(duration): Retrieves the model information for a given duration.
+        validate(testX, duration): Validates the KDE model using the provided test data.
+        decide(data, duration, P_thre=0.95, filename=None): Makes a decision based on the provided data and model.
+
+    Example:
+        >>> bayes = Bayes(decoder)
+        >>> bayes.train(X, Y, duration)
+        >>> decision, label = bayes.decide(data, duration)
     """
-    def __init__(self,decoder,t_max=1,user_mode=0):
+    def __init__(self, decoder, user_mode=0):
+        """
+        Initializes the Bayes class with the given decoder, maximum duration, and user mode.
+
+        Parameters:
+            decoder: The decoder for EEG to be used.
+            user_mode (int): Mode of the user, 0 for norm, 1 for saving model text file.
+        """
         self.decoder = decoder
         self.model_dict = {}
-        self.t_max = t_max
         self.user_mode = user_mode 
 
     def _save_model(self, filename):
         """
         Saves the model to a file.
 
-        Args:
+        Parameters:
             filename (str): File name.
         """
         if not filename.endswith('.pkl'):
@@ -56,7 +113,7 @@ class Bayes:
         """
         Loads the model from a file.
 
-        Args:
+        Parameters:
             filename (str): File name.
         """
         if not filename.endswith('.pkl'):
@@ -67,10 +124,10 @@ class Bayes:
         """
         Extracts decision metrics from predicted and true labels.
 
-        Args:
+        Parameters:
             pred_labels (array-like): Predicted labels.
             Y_test (array-like): True labels.
-            dm_i: Decision metric index.
+            dm_i: Decision metric data.
 
         Returns:
             dict: A dictionary with 'correct' and 'incorrect' keys.
@@ -83,15 +140,16 @@ class Bayes:
                 extracted['incorrect'].append(dm_i[i])
         return extracted
     
-    def train(self,X,Y,duration,Yf=None,filename=None):
+    def train(self, X, Y, duration, Yf=None, filename=None):
         """
         Trains the KDE model and estimator using the provided data.
 
-        Args:
+        Parameters:
             X (array-like): Training data.
             Y (array-like): Training labels.
             duration (float): Duration for which the model is trained.
             Yf (array-like, optional): Additional training data. Defaults to None.
+            filename (str, optional): File name to save the model. Defaults to None.
 
         Returns:
             tuple: KDE models for correct and incorrect decisions, prior probability, and decision metrics.
@@ -137,11 +195,11 @@ class Bayes:
             self._save_model(filename)
         return kde0,kde1,prob,dm0,dm1
     
-    def _get_model(self,duration):
+    def _get_model(self, duration):
         """
         Retrieves the model information for a given duration.
 
-        Args:
+        Parameters:
             duration (float): Duration for which the model is trained.
 
         Returns:
@@ -154,11 +212,11 @@ class Bayes:
         estimator = model_info['estimator']
         return kde0,kde1,prob,estimator
     
-    def validate(self,testX,duration):
+    def validate(self, testX, duration):
         """
         Validates the KDE model using the provided test data.
 
-        Args:
+        Parameters:
             testX (array-like): Test data.
             duration (float): Duration for which the model is validated.
 
@@ -182,17 +240,16 @@ class Bayes:
         else:
             raise ValueError(f"No model found for duration: {duration}")
 
-    def decide(self,data,duration,P_thre = 0.95,filename=None):
+    def decide(self, data, duration, t_max = 1, P_thre = 0.95, filename=None):
         """
         Makes a decision based on the provided data and model.
 
-        Args:
+        Parameters:
             data (array-like): Input data.
             duration (float): Duration for which the model is used.
-            t_max (float, optional): Maximum duration. 
-            p_thre (float, optional): Probability threshold. 
-                                      It denpends on different Decoder.
-                                      As to TRCA, Defaults to 0.95.
+            t_max (float): Maximum duration for the model.
+            P_thre (float, optional): Probability threshold. Defaults to 0.95.
+            filename (str, optional): File name to load the model. Defaults to None.
 
         Returns:
             tuple: Decision (True/False) and predicted label.
@@ -214,9 +271,9 @@ class Bayes:
             p_pre = prob*p_H0/(prob*p_H0+(1-prob)*p_H1)
             p_thre = P_thre
             
-            if p_pre >= p_thre or duration >= self.t_max :
-                return True,label
+            if p_pre >= p_thre or duration >= t_max :
+                return True, label
             else:
-                return False,label
+                return False, label
         else:
             raise ValueError(f"No model found for duration: {duration}")
